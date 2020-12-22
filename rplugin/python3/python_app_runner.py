@@ -1,3 +1,7 @@
+"""
+TODO needs tidying up, better separation of logic when using config file and when launching current
+active script.
+"""
 import pynvim
 import json
 import subprocess
@@ -15,34 +19,68 @@ class PythonAppRunner(object):
         self.apprunner_window_title = 'python_app_runner'
 
         self.kitty_msg_center = os.environ.get("KITTY_LISTEN_ON")
+
+        self.config_file_path = self.get_config_file()
+        self.python = self.get_python_executable(self.config_file_path)
+
+
+    @pynvim.command('CloseRunPythonAppWindow', sync=True)
+    def close_window(self):
+
         if not self.kitty_msg_center:
             self.nvim.out_write("PythonAppRunner: no kitty remote control set up")
+            return
 
-        self.config = self.get_config()
-        self.python = self.get_python_executable(self.config)
+        # If it doesn't exist, do nothing
+        if not self.kitty_app_runner_window_exists():
+            return
+
+        self.close_kitty_apprunner_window()
 
     @pynvim.command('RunPythonApp', sync=True)
     def run_python_app(self):
 
-        # Only act if prerequisits are present
-        if self.config and self.python and self.kitty_msg_center:
+        if not self.kitty_msg_center:
+            self.nvim.out_write("PythonAppRunner: no kitty remote control set up")
+            return
 
-            if not self.kitty_app_runner_window_exists():
-                self.make_kitty_apprunner_window()
+        if not self.kitty_app_runner_window_exists():
+            self.make_kitty_apprunner_window()
 
-            app = self.config['entrypoint']
-            args = self.config['arguments']
+        # 1) Run script from config
+        if self.config_file_path:
 
-            self.run(f"{self.python} {app} {args}")
+            # Read config file every time command is run in case its content has changed
+            with open(self.config_file_path, "r") as config_handle:
+                config = json.load(config_handle)
 
-    def get_config(self) -> Optional[dict]:
+                app = config['entrypoint']
+                args = config['arguments']
+
+                self.run(f"{self.python} {app} {args}")
+
+        # 2) Run current script
+        else:
+            current_file = Path(self.nvim.eval('expand("%:p")'))
+            self.run(f"{self.python} {current_file}")
+
+        import time
+        time.sleep(3)
+
+        self.close_kitty_apprunner_window()
+
+
+
+    def get_config_file(self) -> Optional[Path]:
         """
         Look in buffer directory and in all parent directories for config file.
         """
         cwd = Path(self.nvim.eval('getcwd()'))
 
-        # Look for config file in current directory
+        # First assume config file can be found in current directory
         config_file = cwd / self.config_file_name
+
+        # if not found there, look in first root directory with .git folder
         if not config_file.exists():
             # Look for config file in git root directory all parents
             found_git = False
@@ -52,26 +90,35 @@ class PythonAppRunner(object):
                     config_file = parent_dir / self.config_file_name
                     if config_file.exists():
                         break
+
+                # Only seach in the first directory with .git
+                if found_git:
+                    break
+
         if not found_git:
             self.nvim.out_write('PythonAppRunner: .git directory not found in parent directories')
 
-        if not config_file.exists():
+        if config_file.exists():
+            return config_file
+        else:
             self.nvim.out_write(f'PythonAppRunner: {self.config_file_name} not found in .git root')
-        else:
-            with open(config_file, "r") as config_handle:
-                return json.load(config_handle)
+            return None
 
-    def get_python_executable(self, config) -> Optional[str]:
+    def get_python_executable(self, config_file: Optional[Path]) -> Optional[str]:
 
-        if config['python_executable']:
-            python = config['python_executable']
-        else:
-            python = self.nvim.vars.get('python3_host_prog')
+        python = None
+        if config_file:
+            with open(self.config_file_path, "r") as config_handle:
+                config = json.load(config_handle)
+                python = config['python_executable']
 
         if not python:
-            msg = ('PythonAppRunner: python executable not found in'
-                   ' configuration or nvim init')
-            self.nvim.out_write(msg)
+            try:
+                python = self.nvim.vars.get('python3_host_prog')
+            except ValueError:
+                msg = ('PythonAppRunner: python executable not found in'
+                       ' configuration or nvim init')
+                self.nvim.out_write(msg)
 
         return python
 
@@ -98,6 +145,12 @@ class PythonAppRunner(object):
         cmd = (f'kitty @ --to {self.kitty_msg_center} new-window --keep-focus'
                f' --title {self.apprunner_window_title}')
 
-        self.nvim.out_write("PythonAppRunner: about to make window")
         if subprocess.run(cmd, shell=True).returncode == 1:
-            self.nvim.out_write(f'PythonAppRunner: kitty window could not be made')
+            self.nvim.out_write('PythonAppRunner: kitty window could not be made')
+
+    def close_kitty_apprunner_window(self):
+        cmd = (f'kitty @ --to {self.kitty_msg_center} close-window'
+               f' --title {self.apprunner_window_title}')
+
+        if subprocess.run(cmd, shell=True).returncode == 1:
+            self.nvim.out_write('PythonAppRunner: kitty window could not be closed')
