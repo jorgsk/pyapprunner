@@ -23,7 +23,6 @@ class PythonAppRunner(object):
         self.config_file_path = self.get_config_file()
         self.python = self.get_python_executable(self.config_file_path)
 
-
     @pynvim.command('CloseRunPythonAppWindow', sync=True)
     def close_window(self):
 
@@ -61,15 +60,15 @@ class PythonAppRunner(object):
 
         # 2) Run current script
         else:
+            # but first cd to current directory
+            cwd = Path(self.nvim.eval('getcwd()'))
             current_file = Path(self.nvim.eval('expand("%:p")'))
-            self.run(f"{self.python} {current_file}")
+            self.run(f"cd {cwd} && {self.python} {current_file}")
 
         import time
         time.sleep(3)
 
         self.close_kitty_apprunner_window()
-
-
 
     def get_config_file(self) -> Optional[Path]:
         """
