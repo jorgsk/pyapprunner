@@ -30,7 +30,7 @@ class PythonAppRunner(object):
             self.nvim.out_write("PythonAppRunner: no kitty remote control set up")
             return
 
-        # If it doesn't exist, do nothing
+        # If window doesn't exist, do nothing
         if not self.kitty_app_runner_window_exists():
             return
 
@@ -56,6 +56,7 @@ class PythonAppRunner(object):
                 app = config['entrypoint']
                 args = config['arguments']
 
+                self.run(f"cd {app.parent}")
                 self.run(f"{self.python} {app} {args}")
 
         # 2) Run current script
@@ -63,12 +64,8 @@ class PythonAppRunner(object):
             # but first cd to current directory
             cwd = Path(self.nvim.eval('getcwd()'))
             current_file = Path(self.nvim.eval('expand("%:p")'))
-            self.run(f"cd {cwd} && {self.python} {current_file}")
-
-        import time
-        time.sleep(3)
-
-        self.close_kitty_apprunner_window()
+            self.run(f"cd {cwd}")
+            self.run(f"{self.python} {current_file}")
 
     def get_config_file(self) -> Optional[Path]:
         """
@@ -94,8 +91,8 @@ class PythonAppRunner(object):
                 if found_git:
                     break
 
-        if not found_git:
-            self.nvim.out_write('PythonAppRunner: .git directory not found in parent directories')
+            if not found_git:
+                self.nvim.out_write('PythonAppRunner: .git directory not found in parent directories')
 
         if config_file.exists():
             return config_file
@@ -107,7 +104,7 @@ class PythonAppRunner(object):
 
         python = None
         if config_file:
-            with open(self.config_file_path, "r") as config_handle:
+            with open(config_file, "r") as config_handle:
                 config = json.load(config_handle)
                 python = config['python_executable']
 
@@ -149,7 +146,7 @@ class PythonAppRunner(object):
 
     def close_kitty_apprunner_window(self):
         cmd = (f'kitty @ --to {self.kitty_msg_center} close-window'
-               f' --title {self.apprunner_window_title}')
+               f' --match title:{self.apprunner_window_title}')
 
         if subprocess.run(cmd, shell=True).returncode == 1:
             self.nvim.out_write('PythonAppRunner: kitty window could not be closed')
