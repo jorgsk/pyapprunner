@@ -53,7 +53,7 @@ class PythonAppRunner(object):
             with open(self.config_file_path, "r") as config_handle:
                 config = json.load(config_handle)
 
-                app = config['entrypoint']
+                app = Path(config['entrypoint'])
                 args = config['arguments']
 
                 self.run(f"cd {app.parent}")
